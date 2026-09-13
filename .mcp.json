@@ -3,6 +3,10 @@
     "r3ne": {
       "command": "node",
       "args": ["${CLAUDE_PLUGIN_ROOT}/mcp-server/dist/index.mjs"]
+    },
+    "r3ne-timeline": {
+      "command": "node",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/mcp-timeline/index.mjs"]
     }
   }
 }
