@@ -1,0 +1,6 @@
+# Nested private app repo (github.com/FranciscoOutonB/r3ne)
+swift-app/
+
+# macOS / profiling
+.DS_Store
+*.profraw
