@@ -8,7 +8,7 @@ Load this when building anything 3D or writing a `pbrMaterial`.
 |---|---|---|
 | `scene3d` | `texture` | Composer: collects geometry/light/camera and renders to a texture |
 | `cube3d`, `sphere3d`, `plane3d`, `torus3d`, `cylinder3d`, `cone3d` | `geometry` | Primitive meshes; have a `material` input |
-| `meshLoader3d` | `geometry` | Loads .obj/.usdz/.fbx/.gltf/.dae/.3ds/.blend (Assimp) — `filePath` param |
+| `meshLoader3d` | `geometry` | Loads .glb/.gltf (best: full PBR), .fbx/.obj/.dae/.usdz… — use the `import_mesh` tool (see the `r3ne-3d` skill) |
 | `text3d` | `geometry` | CoreText-rasterized text on an alpha-tested quad. Params: `text`, `fontName`, `fontPixelSize` |
 | `directionalLight3d`, `pointLight3d`, `spotLight3d` | `light` | One directional → cast shadows |
 | `camera3d` | `camera` | Optional; without one, arcball fallback (mouse orbit in viewport) |
@@ -31,7 +31,7 @@ Load this when building anything 3D or writing a `pbrMaterial`.
 }
 ```
 
-`autoRotate*` is rad/sec — use small values like 0.2–0.6 for nice spin.
+`rotation*` is radians (what keyframes store); `rotationXDeg/YDeg/ZDeg` take / return the same angles in degrees, as the inspector shows them (when both are sent, `…Deg` wins). `autoRotate*` is rad/sec (the inspector shows °/s) — use small values like 0.2–0.6 for nice spin.
 
 ## Material params (geometry primitives)
 

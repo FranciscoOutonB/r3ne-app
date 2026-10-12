@@ -2,8 +2,9 @@
 
 Drive [R3NE](https://r3ne.app) (a node-based real-time VFX engine for macOS) from Claude. The plugin bundles:
 
-- **`r3ne` MCP server** — 13 tools for creating shaders, building 3D scenes, wiring nodes, and compositions. Talks to the running R3NE.app via `http://localhost:19780`.
+- **`r3ne` MCP server** — 20 tools for creating shaders, building 3D scenes, importing meshes, wiring nodes, seeing renders (`snapshot`), and saving projects. Talks to the running R3NE.app via `http://127.0.0.1:19780` (`R3NE_API_PORT` / `R3NE_API_BASE` env override).
 - **`r3ne` Skill** — teaches Claude the engine's mental model, MSL `@input` annotations, the 3D pipeline (Scene3D / Root composer), and common pitfalls. Auto-loads when you mention R3NE / VJ / shader / 3D scene.
+- **`r3ne-3d` Skill** — the 3D scene workflow: plan → skeleton → block-in → lighting → materials → camera → post, verifying each step with `snapshot`; importing meshes made in Blender (headless template script or the Blender MCP) or procedurally (stdlib glTF writer); look recipes, gotchas, and performance budgets for M3/M4/M5.
 
 ## Prerequisites
 
@@ -38,6 +39,8 @@ Claude should call `mcp__r3ne__health` and respond with the running app's versio
 - "Write a 2D shader that does a rainbow stripes warp on the inputTex, with a `speed` slider"
 - "Add a fog setting to the scene with density 0.3 and a teal color"
 - "What's currently on the graph? Tell me which nodes aren't wired to Root."
+- "Haz una escena 3D al atardecer con un cristal low-poly que modeles en Blender, y guárdala"
+- "Import ~/R3NE Assets/meshes/chair.glb, light it like a product shot with an 85 mm lens"
 
 ## Tools exposed
 
@@ -57,6 +60,12 @@ Claude should call `mcp__r3ne__health` and respond with the running app's versio
 | `edit_shader` | Edit MSL source on an existing shader; returns compilation result |
 | `get_shader_errors` | Read the compilation state for a shader node |
 | `create_composition` | Atomic batch: create N nodes + M connections in one call |
+| `get_node` | One node in full: ports with parsed values, transform, Scene 3D / Material / Mesh Loader params |
+| `snapshot` | Return a node's render as an image (optionally an Export-identical offline frame; can save the full-res PNG) |
+| `import_mesh` | Import a .glb/.gltf/.fbx/.obj/.usdz… as a Mesh Loader, wire it into a scene, report parts and bounds |
+| `look_at` | Aim a camera or light from an eye point at a target (optionally set focus distance) |
+| `save_project` | Save the graph to a new .r3d (refuses to overwrite unless asked) |
+| `open_project` | Open a .r3d (replaces the current graph) |
 
 ## Layout
 
@@ -71,11 +80,20 @@ r3ne-app/
 │   └── references/
 │       ├── 3d-pipeline.md
 │       └── shader-patterns.md
+├── skills/r3ne-3d/
+│   ├── SKILL.md             # 3D scene workflow + mesh import
+│   ├── references/          # mesh-import, look-recipes, gotchas, performance
+│   └── scripts/             # blender_export_glb.py (Blender headless), gltf_writer.py (stdlib GLB)
 └── mcp-server/
     ├── package.json
     └── dist/
         └── index.mjs        # esbuild bundle (~1 MB, all deps inlined)
 ```
+
+## Changelog
+
+- **0.3.0** — New `r3ne-3d` skill (3D scene workflow, mesh import from Blender / procedural glTF, look recipes, gotchas, performance budgets). New MCP tools: `get_node`, `snapshot`, `import_mesh`, `look_at`, `save_project`, `open_project`; `R3NE_API_PORT` / `R3NE_API_BASE` env override. `r3ne` skill: sampler name fix (`texSampler`), no `@input int`. Needs an R3NE build from the render-3d branch for save/open, offline snapshots and Mesh Loader load reports.
+- **0.2.0** — Initial plugin: `r3ne` skill + bundled MCP server.
 
 ## License
 

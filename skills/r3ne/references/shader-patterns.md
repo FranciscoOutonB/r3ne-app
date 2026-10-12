@@ -9,7 +9,7 @@ in.uv          float2   normalized 0..1 UV
 in.position    float4   clip-space position
 u.time         float    seconds elapsed
 u.resolution   float2   render-target size in pixels
-s              sampler  linear-clamp predeclared
+texSampler      sampler  linear-clamp predeclared
 ```
 
 ## `@input` declarations cheat sheet
@@ -20,7 +20,6 @@ s              sampler  linear-clamp predeclared
 // @input color tint 0.2 0.6 1.0 1.0         // r g b a
 // @input bool invert false                  // checkbox
 // @input texture inputTex                   // texture port
-// @input int steps 16 4 64                  // integer slider
 ```
 
 Min/max define the inspector slider range. Defaults are saved with the project.
@@ -46,7 +45,7 @@ return float4(col, 1.0);
 // @input texture inputTex
 // @input float strength 1.0 0.0 4.0
 
-float4 c = inputTex.sample(s, in.uv);
+float4 c = inputTex.sample(texSampler, in.uv);
 c.rgb = pow(c.rgb, float3(1.0 / strength));   // gamma curve
 return c;
 ```
@@ -66,7 +65,7 @@ const float2 taps[9] = {
     float2(-1, -1), float2( 1, -1), float2(-1,  1)
 };
 for (int i = 0; i < N; ++i) {
-    acc += inputTex.sample(s, in.uv + taps[i] * px * radius).rgb;
+    acc += inputTex.sample(texSampler, in.uv + taps[i] * px * radius).rgb;
 }
 return float4(acc / float(N), 1.0);
 ```
@@ -80,7 +79,7 @@ return float4(acc / float(N), 1.0);
 
 float2 uv = in.uv;
 uv.x += sin(uv.y * 20.0 + u.time * speed) * amount;
-return inputTex.sample(s, uv);
+return inputTex.sample(texSampler, uv);
 ```
 
 ### Two-input mix
@@ -90,8 +89,8 @@ return inputTex.sample(s, uv);
 // @input texture texB
 // @input float blend 0.5 0.0 1.0
 
-float4 a = texA.sample(s, in.uv);
-float4 b = texB.sample(s, in.uv);
+float4 a = texA.sample(texSampler, in.uv);
+float4 b = texB.sample(texSampler, in.uv);
 return mix(a, b, blend);
 ```
 
@@ -99,9 +98,9 @@ return mix(a, b, blend);
 
 - **`fragment` keyword in DYNAMIC INPUT MODE**: don't write it. Just write the body that returns `float4`. R3NE wraps it.
 - **FULL MODE**: if you write the full function signature (`fragment float4 ...`), `@input` annotations are ignored — you must declare uniforms yourself in `ShaderUniforms`. Avoid unless you have a specific reason.
-- **`s` sampler**: predeclared. Don't shadow with another `s` variable.
+- **`texSampler` sampler**: predeclared (linear, clamp-to-edge).
 - **Texture out of bounds**: linear sampling clamps to edge. No wrap unless you change the sampler.
-- **Performance**: keep loops bounded by a `const int` so the compiler can unroll. Loops bounded by `@input int` work but generate slower code.
+- **Performance**: keep loops bounded by a `const int` (or a literal) so the compiler can unroll. There is no `int` `@input` type — use a `float` input and `int(x)` it in the body if you need a runtime count (slower, no unroll).
 - **Pink screen**: usually NaN somewhere. Common causes: divide-by-zero, sqrt of negative, log of zero. Use `max(x, 1e-5)` defensively.
 
 ## Iterating on a live shader

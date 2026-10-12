@@ -4224,7 +4224,7 @@ var require_core = __commonJS({
       errorsText(errors = this.errors, { separator = ", ", dataVar = "data" } = {}) {
         if (!errors || errors.length === 0)
           return "No errors";
-        return errors.map((e) => `${dataVar}${e.instancePath} ${e.message}`).reduce((text, msg) => text + separator + msg);
+        return errors.map((e) => `${dataVar}${e.instancePath} ${e.message}`).reduce((text2, msg) => text2 + separator + msg);
       }
       $dataMetaSchema(metaSchema, keywordsJsonPointers) {
         const rules = this.RULES.all;
@@ -17665,8 +17665,8 @@ function ko_default() {
 }
 
 // node_modules/zod/v4/locales/lt.js
-var capitalizeFirstCharacter = (text) => {
-  return text.charAt(0).toUpperCase() + text.slice(1);
+var capitalizeFirstCharacter = (text2) => {
+  return text2.charAt(0).toUpperCase() + text2.slice(1);
 };
 function getUnitTypeFromNumber(number4) {
   const abs = Math.abs(number4);
@@ -30114,7 +30114,13 @@ var StdioServerTransport = class {
 };
 
 // src/api-client.ts
-var API_BASE = "http://localhost:19780";
+function resolveApiBase() {
+  const base = process.env.R3NE_API_BASE?.trim();
+  if (base) return base.replace(/\/+$/, "");
+  const port = Number(process.env.R3NE_API_PORT);
+  return `http://127.0.0.1:${Number.isInteger(port) && port > 0 && port < 65536 ? port : 19780}`;
+}
+var API_BASE = resolveApiBase();
 async function apiCall(method, path, body) {
   const url2 = `${API_BASE}${path}`;
   const options = {
@@ -30146,6 +30152,9 @@ async function healthCheck() {
 async function getGraph() {
   return apiCall("GET", "/api/graph");
 }
+async function getNode(id) {
+  return apiCall("GET", `/api/nodes/${id}`);
+}
 async function createNode(params) {
   return apiCall("POST", "/api/nodes", params);
 }
@@ -30176,19 +30185,473 @@ async function listNodeTypes() {
 async function clearGraph() {
   return apiCall("POST", "/api/graph/clear");
 }
+async function snapshot(id) {
+  return apiCall("GET", `/api/nodes/${id}/snapshot`);
+}
+async function offlineFrame(id) {
+  return apiCall("POST", `/api/nodes/${id}/offline-frame`);
+}
+async function saveProject(path) {
+  return apiCall("POST", "/api/project/save", { path });
+}
+async function openProject(path) {
+  return apiCall("POST", "/api/project/open", { path });
+}
+
+// src/tools3d.ts
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import { existsSync, statSync } from "node:fs";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { dirname, extname, isAbsolute, join } from "node:path";
+var execFileAsync = promisify(execFile);
+var sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+var text = (v) => ({
+  content: [{ type: "text", text: typeof v === "string" ? v : JSON.stringify(v, null, 2) }]
+});
+var fail = (msg) => ({ content: [{ type: "text", text: `Error: ${msg}` }], isError: true });
+function explain(e, feature) {
+  const m = e.message ?? String(e);
+  if (/Not found: (GET|POST|PUT)/.test(m)) {
+    return `${m} \u2014 this R3NE build has no ${feature} route (needs the render-3d branch build or newer).`;
+  }
+  return m;
+}
+function parsePortValue(raw) {
+  if (raw === void 0) return void 0;
+  const s = raw.trim();
+  if (s === "true" || s === "false") return s === "true";
+  if (/^-?\d+(\.\d+)?(e[-+]?\d+)?$/i.test(s)) return Number(s);
+  if (/^SIMD\d/.test(s)) {
+    const nums = s.replace(/^SIMD\d<[^>]*>/, "").match(/-?\d+(\.\d+)?(e[-+]?\d+)?/gi);
+    return nums ? nums.map(Number) : s;
+  }
+  return s;
+}
+function compactNode(n) {
+  const values = {};
+  const connected = [];
+  const unconnectedPorts = [];
+  for (const p of n.inputs) {
+    if (p.connected) connected.push(p.name);
+    if (p.defaultValue !== void 0) values[p.name] = parsePortValue(p.defaultValue);
+    else if (!p.connected) unconnectedPorts.push(`${p.name}:${p.type}`);
+  }
+  const out = {
+    id: n.id,
+    type: n.type,
+    displayName: n.displayName,
+    position: n.position,
+    values,
+    connectedInputs: connected,
+    otherInputs: unconnectedPorts,
+    outputs: n.outputs.map((o) => `${o.name}:${o.type}`)
+  };
+  if (n.transform) out.transform = n.transform;
+  if (n.params && Object.keys(n.params).length) out.params = n.params;
+  if (n.compilationState) out.compilationState = n.compilationState;
+  return out;
+}
+function nextFreePort(node, prefix) {
+  return node.inputs.filter((p) => p.name.startsWith(prefix) && !p.connected).map((p) => ({ name: p.name, n: Number(p.name.slice(prefix.length)) || 0 })).sort((a, b) => a.n - b.n)[0]?.name;
+}
+var vec3 = external_exports3.tuple([external_exports3.number(), external_exports3.number(), external_exports3.number()]);
+async function encodeForModel(pngB64, srcWidth, maxWidth, format, quality) {
+  const png = Buffer.from(pngB64, "base64");
+  const needsResize = srcWidth > maxWidth;
+  if (!needsResize && format === "png") {
+    return { data: pngB64, mimeType: "image/png", width: srcWidth, bytes: png.length };
+  }
+  const dir = await mkdtemp(join(tmpdir(), "r3ne-snap-"));
+  try {
+    const inPath = join(dir, "in.png");
+    await writeFile(inPath, png);
+    let width = Math.min(srcWidth, maxWidth);
+    let q = quality;
+    for (let attempt = 0; attempt < 4; attempt++) {
+      const outPath = join(dir, `out${attempt}.${format === "jpeg" ? "jpg" : "png"}`);
+      const args = ["-s", "format", format];
+      if (format === "jpeg") args.push("-s", "formatOptions", String(q));
+      if (width < srcWidth) args.push("--resampleWidth", String(width));
+      args.push(inPath, "--out", outPath);
+      await execFileAsync("/usr/bin/sips", args);
+      const buf = await readFile(outPath);
+      if (buf.length <= 45e4 || attempt === 3) {
+        return { data: buf.toString("base64"), mimeType: format === "jpeg" ? "image/jpeg" : "image/png", width, bytes: buf.length };
+      }
+      if (format === "jpeg" && q > 60) q = 60;
+      else width = Math.max(320, Math.round(width * 0.75));
+    }
+    throw new Error("unreachable");
+  } catch (e) {
+    if (png.length < 15e5) {
+      return { data: pngB64, mimeType: "image/png", width: srcWidth, bytes: png.length, note: `resize failed (${e.message}); sent original` };
+    }
+    throw e;
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+}
+var MESH_FORMATS = {
+  glb: "glTF binary \u2014 best: metallic-roughness PBR, embedded textures, alpha, emission, per-part materials",
+  gltf: "glTF JSON \u2014 like .glb; keep the .bin and textures next to it",
+  fbx: "FBX via Assimp \u2014 legacy diffuse/specular approximated as PBR; often cm units / Z-up",
+  obj: "OBJ (+MTL) via Assimp \u2014 no real PBR; textures only through the MTL",
+  dae: "Collada via Assimp",
+  "3ds": "3DS via Assimp (legacy)",
+  blend: "Blender file via Assimp \u2014 old .blend versions only; export .glb from Blender instead",
+  ply: "PLY via ModelIO (vertex colors not used as material)",
+  stl: "STL via ModelIO \u2014 geometry only, no UVs/materials",
+  usd: "USD via ModelIO",
+  usda: "USD via ModelIO",
+  usdc: "USD via ModelIO",
+  usdz: "USDZ via ModelIO",
+  abc: "Alembic via ModelIO (first frame)",
+  ms3d: "Assimp",
+  ase: "Assimp",
+  x: "Assimp",
+  lwo: "Assimp",
+  off: "Assimp",
+  ac: "Assimp"
+};
+function registerSceneTools(server2) {
+  server2.tool(
+    "get_node",
+    `Read one node in full: its input ports (current value or 'connected'), outputs, 3D transform
+(radians + degrees), and node-specific params \u2014 Scene 3D render settings, Material values,
+Mesh Loader load state (loaded, parts, triangleCount, boundsMin/Max/Size), Sky sun direction\u2026
+Use it after create_node to learn the exact port names before set_params, and after import_mesh
+to read the model's size. compact (default true) parses the port values the API returns as strings
+(e.g. "SIMD4<Float>(1.0, 0.5, 0.2, 1.0)" \u2192 [1, 0.5, 0.2, 1]); compact:false = raw API JSON.`,
+    {
+      id: external_exports3.string().describe("Node UUID"),
+      compact: external_exports3.boolean().optional().describe("Parsed, compact view (default true)")
+    },
+    async ({ id, compact }) => {
+      try {
+        const n = await getNode(id);
+        return text(compact === false ? n : compactNode(n));
+      } catch (e) {
+        return fail(e.message);
+      }
+    }
+  );
+  server2.tool(
+    "snapshot",
+    `SEE what a node renders: returns the image itself (MCP image content) so you can judge the result.
+Use it after every major step of a 3D scene (block-in, lighting, materials, camera, post) and look
+critically: exposure (crushed blacks / blown highlights), framing, scale, shadows, noise, color.
+- id: a Scene 3D node (its rendered frame), the Root node (final composited output), any 2D node
+  (its texture), or a Material node (its preview ball).
+- offline: true (Scene 3D only) first renders one frame the way Export does \u2014 deterministic, the path
+  tracer converges, TAA history restarts. Prefer it for verification; live frames can be mid-adaptation.
+- waitMs (default 250, live only): let a few frames render after recent changes (auto exposure, TAA).
+- maxWidth (default 1024) / format (jpeg default, or png) / quality keep the image small for you.
+- savePath: absolute path to also write the FULL-resolution PNG (evidence, thumbnails, deliverables).
+The 3D frame size follows the Scene 3D resolution (resolutionX/Y), not the window.`,
+    {
+      id: external_exports3.string().describe("Node UUID (Scene 3D, Root, 2D node, or Material)"),
+      offline: external_exports3.boolean().optional().describe("Scene 3D only: render an Export-identical frame first"),
+      waitMs: external_exports3.number().int().min(0).max(1e4).optional().describe("Live only: wait before reading (default 250)"),
+      maxWidth: external_exports3.number().int().min(128).max(4096).optional().describe("Downscale to this width (default 1024)"),
+      format: external_exports3.enum(["jpeg", "png"]).optional().describe("Encoding of the returned image (default jpeg)"),
+      quality: external_exports3.number().int().min(30).max(100).optional().describe("JPEG quality (default 82)"),
+      savePath: external_exports3.string().optional().describe("Absolute .png path to also save the full-resolution frame")
+    },
+    async ({ id, offline, waitMs, maxWidth, format, quality, savePath }) => {
+      try {
+        const info = {};
+        if (offline) {
+          try {
+            info.offlineFrame = await offlineFrame(id);
+          } catch (e) {
+            return fail(explain(e, "offline-frame") + " (offline: true only works on a Scene 3D node)");
+          }
+        } else {
+          await sleep(waitMs ?? 250);
+        }
+        const snap = await snapshot(id);
+        if (savePath) {
+          if (!isAbsolute(savePath) || extname(savePath).toLowerCase() !== ".png") {
+            return fail("savePath must be an absolute .png path");
+          }
+          await mkdir(dirname(savePath), { recursive: true });
+          await writeFile(savePath, Buffer.from(snap.png, "base64"));
+          info.savedTo = savePath;
+        }
+        const enc = await encodeForModel(snap.png, snap.width, maxWidth ?? 1024, format ?? "jpeg", quality ?? 82);
+        Object.assign(info, {
+          sourceSize: [snap.width, snap.height],
+          sentWidth: enc.width,
+          sentBytes: enc.bytes,
+          meanAlpha: snap.meanAlpha
+        });
+        if (enc.note) info.note = enc.note;
+        if (typeof snap.meanAlpha === "number" && snap.meanAlpha < 0.02) {
+          info.warning = "Image is (almost) fully transparent \u2014 nothing rendered: check wiring, camera, lights.";
+        }
+        return {
+          content: [
+            { type: "image", data: enc.data, mimeType: enc.mimeType },
+            { type: "text", text: JSON.stringify(info, null, 2) }
+          ]
+        };
+      } catch (e) {
+        return fail(explain(e, "snapshot"));
+      }
+    }
+  );
+  server2.tool(
+    "save_project",
+    `Save the whole graph to a .r3d project file (same as File \u25B8 Save As). Use a NEW descriptive path
+(e.g. ~/R3NE Assets/scenes/<name>.r3d, written absolute) \u2014 never overwrite the user's project unless
+they asked: an existing file is refused unless overwrite: true. Parent folders are created.
+External assets (meshes, textures, HDRIs) are referenced by absolute path, not embedded \u2014 keep them
+in a stable folder, never /tmp.`,
+    {
+      path: external_exports3.string().describe("Absolute path ending in .r3d"),
+      overwrite: external_exports3.boolean().optional().describe("Allow replacing an existing file (default false)")
+    },
+    async ({ path, overwrite }) => {
+      if (!isAbsolute(path) || extname(path).toLowerCase() !== ".r3d") return fail("path must be an absolute .r3d path");
+      if (existsSync(path) && !overwrite) {
+        return fail(`${path} already exists \u2014 pick a new name, or pass overwrite: true if the user asked to replace it`);
+      }
+      try {
+        await mkdir(dirname(path), { recursive: true });
+        const r = await saveProject(path);
+        const size = existsSync(path) ? statSync(path).size : void 0;
+        return text({ ...r, bytes: size });
+      } catch (e) {
+        return fail(explain(e, "project save"));
+      }
+    }
+  );
+  server2.tool(
+    "open_project",
+    `Open a .r3d project, REPLACING the current graph (unsaved changes in the app are lost \u2014 ask the user
+or save_project first). Returns the node count; follow with get_graph.`,
+    {
+      path: external_exports3.string().describe("Absolute path to an existing .r3d file")
+    },
+    async ({ path }) => {
+      if (!isAbsolute(path) || extname(path).toLowerCase() !== ".r3d") return fail("path must be an absolute .r3d path");
+      if (!existsSync(path)) return fail(`Not found: ${path}`);
+      try {
+        return text(await openProject(path));
+      } catch (e) {
+        return fail(explain(e, "project open"));
+      }
+    }
+  );
+  server2.tool(
+    "import_mesh",
+    `Import a 3D model file made outside R3NE (Blender, procedural script, downloaded asset) as a
+Mesh Loader 3D node, optionally wired into a Scene 3D (or Root) and to a Material node.
+Prefer .glb (glTF binary): full metallic-roughness PBR, embedded textures, alpha, emission and one
+material per part. FBX/OBJ/DAE go through Assimp (approximate materials; FBX is often cm + Z-up).
+- path: ABSOLUTE path (keep assets in a stable folder such as ~/R3NE Assets/meshes, never /tmp).
+- sceneId: Scene 3D or Root node \u2192 connects to its next free geo_N input (the mesh only loads once
+  it is wired into a scene and a frame renders).
+- materialId: a Material (material3d / preset / pbrMaterial) node \u2014 overrides ALL parts of the file.
+  Leave it out to keep the file's own materials (useFileMaterials, default true).
+- scale (uniform, applied to the vertices), zUp (source is Z-up \u2192 rotate to Y-up), recenter (bbox
+  centre \u2192 node origin; off keeps the file's origin, e.g. at the model's base).
+- position [x,y,z] meters, rotationDeg [x,y,z] DEGREES.
+Returns the node id, wiring, load summary, parts (name, triangles, material) and bounds
+(boundsMin/Max/Size in meters after scale) \u2014 use the size to fix units (a 180-unit-tall model is in
+cm \u2192 scale 0.01), sit it on the floor (positionY = -boundsMin.y) and frame the camera.`,
+    {
+      path: external_exports3.string().describe("Absolute path to .glb/.gltf/.fbx/.obj/.dae/.usdz/\u2026 file"),
+      name: external_exports3.string().optional().describe("Node display name (default: file name)"),
+      sceneId: external_exports3.string().optional().describe("Scene 3D or Root node id to wire geometry into"),
+      materialId: external_exports3.string().optional().describe("Material node id to override all parts"),
+      scale: external_exports3.number().positive().optional().describe("Uniform scale (default 1)"),
+      zUp: external_exports3.boolean().optional().describe("Source is Z-up (default false)"),
+      recenter: external_exports3.boolean().optional().describe("Move bbox centre to origin (default false)"),
+      useFileMaterials: external_exports3.boolean().optional().describe("Use the file's materials (default true)"),
+      position: vec3.optional().describe("[x, y, z] meters"),
+      rotationDeg: vec3.optional().describe("[x, y, z] degrees"),
+      x: external_exports3.number().optional().describe("Canvas X (default: left of the scene node)"),
+      y: external_exports3.number().optional().describe("Canvas Y"),
+      waitMs: external_exports3.number().int().min(0).max(3e4).optional().describe("Max wait for the load report (default 5000)")
+    },
+    async (a) => {
+      const warnings = [];
+      if (!isAbsolute(a.path)) return fail("path must be absolute");
+      if (a.path.startsWith("/tmp/") || a.path.startsWith("/private/tmp/")) {
+        warnings.push("Asset lives in /tmp \u2014 it can vanish and the saved .r3d would lose it; move it to e.g. ~/R3NE Assets/meshes/");
+      }
+      if (!existsSync(a.path)) return fail(`File not found: ${a.path}`);
+      if (statSync(a.path).isDirectory()) return fail(`${a.path} is a folder, not a mesh file`);
+      const ext = extname(a.path).slice(1).toLowerCase();
+      if (!MESH_FORMATS[ext]) {
+        return fail(`Unsupported extension .${ext}. Supported: ${Object.keys(MESH_FORMATS).join(", ")} (export .glb when you can)`);
+      }
+      if (ext !== "glb" && ext !== "gltf") warnings.push(`.${ext}: ${MESH_FORMATS[ext]}`);
+      const mb = statSync(a.path).size / 1e6;
+      if (mb > 100) warnings.push(`File is ${mb.toFixed(0)} MB \u2014 loading blocks a frame; decimate / compress textures for live use`);
+      try {
+        let scene;
+        let geoPort;
+        if (a.sceneId) {
+          scene = await getNode(a.sceneId);
+          if (scene.type !== "scene3d" && scene.type !== "root") {
+            return fail(`sceneId is a '${scene.type}' node \u2014 pass a Scene 3D (scene3d) or the Root node`);
+          }
+          geoPort = nextFreePort(scene, "geo_");
+          if (!geoPort) return fail("No free geo_N input on that scene (all slots used)");
+        }
+        if (a.materialId) {
+          const mat = await getNode(a.materialId);
+          if (!mat.outputs.some((o) => o.name === "material")) {
+            return fail(`materialId is a '${mat.type}' node with no 'material' output`);
+          }
+        }
+        const params = { filePath: a.path };
+        if (a.scale !== void 0) params.scale = a.scale;
+        if (a.zUp !== void 0) params.zUp = a.zUp;
+        if (a.recenter !== void 0) params.recenter = a.recenter;
+        if (a.useFileMaterials !== void 0) params.useFileMaterials = a.useFileMaterials;
+        if (a.position) [params.positionX, params.positionY, params.positionZ] = a.position;
+        if (a.rotationDeg) [params.rotationXDeg, params.rotationYDeg, params.rotationZDeg] = a.rotationDeg;
+        let x = a.x, y = a.y;
+        if ((x === void 0 || y === void 0) && scene) {
+          const used = scene.inputs.filter((p2) => p2.name.startsWith("geo_") && p2.connected).length;
+          x ??= scene.position.x - 340;
+          y ??= scene.position.y - 120 + used * 110;
+        }
+        const base = a.path.split("/").pop().replace(/\.[^.]+$/, "");
+        const node = await createNode({ type: "meshLoader3d", name: a.name ?? base, x, y, params });
+        const wiring = {};
+        if (a.materialId) {
+          await createConnection({ sourceNodeId: a.materialId, sourcePort: "material", targetNodeId: node.id, targetPort: "material" });
+          wiring.material = a.materialId;
+        }
+        if (scene && geoPort) {
+          await createConnection({ sourceNodeId: node.id, sourcePort: "geometry", targetNodeId: scene.id, targetPort: geoPort });
+          wiring.scenePort = `${scene.displayName}.${geoPort}`;
+        } else {
+          warnings.push("Not wired into a scene: the file loads (and reports parts/bounds) only once connected to a Scene 3D / Root geo_N input.");
+        }
+        let p = {};
+        const deadline = Date.now() + (a.waitMs ?? 5e3);
+        if (scene) {
+          do {
+            await sleep(150);
+            p = (await getNode(node.id)).params ?? {};
+            if (p.loaded === true || typeof p.loadSummary === "string" && p.loadSummary !== "") break;
+          } while (Date.now() < deadline);
+        }
+        const report = {
+          id: node.id,
+          name: node.displayName,
+          wiring,
+          loadSummary: p.loadSummary ?? "(not loaded yet)"
+        };
+        for (const k of ["triangleCount", "parts", "boundsMin", "boundsMax", "boundsSize"]) if (p[k] !== void 0) report[k] = p[k];
+        if (p.loadSummary === "File not found" || p.loadSummary === "No geometry") {
+          warnings.push(`The app could not load it: ${p.loadSummary}`);
+        } else if (scene && !p.loaded && p.loadSummary === void 0) {
+          warnings.push("No load report yet (older app build without the Mesh Loader API fields, or the render loop is paused \u2014 window hidden/minimized). Check with get_node / snapshot.");
+        }
+        const size = p.boundsSize;
+        if (size) {
+          const maxDim = Math.max(...size);
+          if (maxDim > 50) warnings.push(`Model is ${maxDim.toFixed(1)} units across \u2014 probably centimeters/millimeters; try scale ${maxDim > 500 ? 1e-3 : 0.01}`);
+          if (maxDim < 0.02) warnings.push(`Model is only ${maxDim.toFixed(4)} units across \u2014 probably exported at the wrong scale`);
+          const minY = p.boundsMin[1];
+          if (!a.recenter && Math.abs(minY) > 0.05 * Math.max(size[1], 1e-3)) {
+            report.floorHint = `bottom is at y=${minY.toFixed(3)}: positionY ${(-minY).toFixed(3)} puts it on the ground (y=0)`;
+          }
+        }
+        if (warnings.length) report.warnings = warnings;
+        return text(report);
+      } catch (e) {
+        return fail(explain(e, "mesh import"));
+      }
+    }
+  );
+  server2.tool(
+    "look_at",
+    `Aim a camera or light: put it at 'eye' and rotate it so it looks at 'target' (both [x,y,z] meters;
+eye defaults to the node's current position). R3NE convention: forward = -Z; rotationX = pitch
+(+ looks up), rotationY = yaw, rotationZ is reset to 0 (roll would tilt the aim). Works for
+camera3d, spot / directional / area lights (a directional light's position doesn't matter, only the
+direction eye\u2192target). Returns the angles (degrees) and the eye\u2192target distance; with
+setFocus: true on a camera it also sets focusDistance to that distance (physical DOF).
+For the Sky node's sun use its azimuth/elevation params instead.`,
+    {
+      id: external_exports3.string().describe("Camera / light node UUID"),
+      target: vec3.describe("Point to look at [x, y, z]"),
+      eye: vec3.optional().describe("Where the node goes [x, y, z] (default: keep current position)"),
+      setFocus: external_exports3.boolean().optional().describe("Camera: set focusDistance = |target - eye|")
+    },
+    async ({ id, target, eye, setFocus }) => {
+      try {
+        const node = await getNode(id);
+        if (!node.transform) return fail(`'${node.type}' has no 3D transform (look_at needs a camera / light / 3D node)`);
+        const e = eye ?? [node.transform.positionX, node.transform.positionY, node.transform.positionZ];
+        const d = [target[0] - e[0], target[1] - e[1], target[2] - e[2]];
+        const dist = Math.hypot(d[0], d[1], d[2]);
+        if (dist < 1e-5) return fail("eye and target are the same point");
+        const f = d.map((v) => v / dist);
+        const deg = 180 / Math.PI;
+        let pitch = Math.asin(Math.max(-1, Math.min(1, f[1]))) * deg;
+        const yaw = Math.abs(f[0]) < 1e-9 && Math.abs(f[2]) < 1e-9 ? 0 : Math.atan2(-f[0], -f[2]) * deg;
+        const notes = [];
+        if (Math.abs(pitch) > 89.5) {
+          pitch = Math.sign(pitch) * 89.5;
+          notes.push("Straight up/down is degenerate for a camera (its up vector is world Y) \u2014 pitch clamped to \xB189.5\xB0");
+        }
+        const params = {
+          positionX: e[0],
+          positionY: e[1],
+          positionZ: e[2],
+          rotationXDeg: pitch,
+          rotationYDeg: yaw,
+          rotationZDeg: 0
+        };
+        if (setFocus) {
+          if (node.inputs.some((p) => p.name === "focusDistance")) params.focusDistance = dist;
+          else notes.push("setFocus ignored: node has no focusDistance port");
+        }
+        const r = await setParams(id, params);
+        const out = {
+          id,
+          type: r.type,
+          eye: e,
+          target,
+          rotationDeg: [round(pitch), round(yaw), 0],
+          distance: round(dist)
+        };
+        if (setFocus && params.focusDistance !== void 0) out.focusDistance = round(dist);
+        if (notes.length) out.notes = notes;
+        return text(out);
+      } catch (e) {
+        return fail(e.message);
+      }
+    }
+  );
+}
+function round(v, digits = 3) {
+  const k = 10 ** digits;
+  return Math.round(v * k) / k;
+}
 
 // src/index.ts
 var server = new McpServer({
   name: "r3ne",
-  version: "1.0.0"
+  version: "1.1.0"
 });
 server.tool(
   "health",
-  "Check if R3NE app is running and the API is available",
+  "Check if R3NE app is running and the API is available (also reports which API address this server talks to; R3NE_API_PORT / R3NE_API_BASE env vars override the default 127.0.0.1:19780)",
   async () => {
     try {
       const result = await healthCheck();
-      return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+      return { content: [{ type: "text", text: JSON.stringify({ ...result, apiBase: API_BASE }, null, 2) }] };
     } catch (e) {
       return { content: [{ type: "text", text: `Error: ${e.message}` }], isError: true };
     }
@@ -30229,13 +30692,17 @@ Shader nodes (2D): type="shader" + MSL source with @input annotations:
   // @input bool invert false
 
 3D nodes (first-class on the canvas, all connect through typed ports):
-  Composer:   "scene3d" \u2014 collects geometry/light/camera ports, outputs texture
-  Geometry:   "cube3d" | "sphere3d" | "plane3d" | "torus3d" | "cylinder3d" | "cone3d"
-              (outputs 'geometry' port, has 'material' input)
-  Lights:     "directionalLight3d" | "pointLight3d" | "spotLight3d"  (outputs 'light')
-  Camera:     "camera3d"  (outputs 'camera')
-  Material:   "pbrMaterial" \u2014 live MSL PBR material (outputs 'material', accept @input annotations).
-              Pass 'source' with fragment body that sets albedo, metallic, roughness, emission.
+  Composer:   "scene3d" \u2014 geo_N / light_N / camera / environment inputs, outputs 'texture'
+  Geometry:   "cube3d" | "sphere3d" | "plane3d" | "torus3d" | "cylinder3d" | "cone3d" | "text3d"
+              | "meshLoader3d" (use the import_mesh tool) (outputs 'geometry', has 'material' input)
+  Modifiers:  "instancer3d" | "noiseDisplace3d" | "twist3d" | "wave3d" (geometry in \u2192 geometry out)
+  Lights:     "directionalLight3d" | "pointLight3d" | "spotLight3d" | "areaLight3d" | "lightArray3d"
+              (outputs 'light'); "sky3d" = physical sky (environment) + 'sun' light output
+  Camera:     "camera3d"  (outputs 'camera'; lens: fov, fStop, focusDistance, shutterSpeed, iso, ndFilter)
+  Material:   "material3d" \u2014 principled PBR (baseColor, metallic, roughness, emission\u2026, maps, presets
+              via {"preset": "<name>"}); "pbrMaterial" \u2014 live MSL material (@input annotations).
+              "texture3d" \u2014 image file \u2192 any material map input.
+  Aim cameras/lights with look_at; check the result with snapshot; read ports with get_node.
 
 Transform/material params for 3D nodes go in 'params':
   {"positionX": 1.0, "positionY": 0, "positionZ": -2.0,
@@ -30243,10 +30710,14 @@ Transform/material params for 3D nodes go in 'params':
    "scaleX": 1, "scaleY": 1, "scaleZ": 1,
    "autoRotateX": 0, "autoRotateY": 0.3, "autoRotateZ": 0,
    "metallic": 1.0, "roughness": 0.1, "emission": [0, 0, 0]}
+  rotation* is radians, autoRotate* rad/s; "rotationXDeg"/"rotationYDeg"/"rotationZDeg" set (and
+  get_graph returns) the same angles in degrees, as the inspector shows them.
 
-Scene3D node params: {"exposure": 1.0, "bloomEnabled": true, "bloomThreshold": 1.0,
-                      "bloomIntensity": 0.5, "ssaoEnabled": false, "shadowBias": 0.005,
-                      "resolutionX": 3840, "resolutionY": 2160}`,
+Scene3D node params (get_node lists them all): {"exposureMode": 0, "exposure": 1.0,
+  "tonemapper": 2, "bloomEnabled": true, "bloomIntensity": 0.8, "fogEnabled": false, "fogMode": 1,
+  "ssaoEnabled": false, "rtMode": 0, "resolutionX": 1920, "resolutionY": 1080}
+Menu params take their index: exposureMode 0 Manual / 1 Physical Camera / 2 Auto; tonemapper
+0 ACES / 1 AgX / 2 AgX Punchy / 3 PBR Neutral / 4 None; rtMode 0 Off / 1 Hybrid / 2 Full RT / 3 Path Tracer.`,
   {
     type: external_exports3.string().describe("Node type (e.g. 'shader', 'blur', 'cube3d', 'pbrMaterial')"),
     name: external_exports3.string().optional().describe("Display name for the node"),
@@ -30568,6 +31039,7 @@ Use targetIndex: -1 to connect to the Root/Output node.`,
     }
   }
 );
+registerSceneTools(server);
 async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);

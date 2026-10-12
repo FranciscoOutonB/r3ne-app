@@ -6,7 +6,9 @@ disable-model-invocation: false
 
 # R3NE — Node Engine MCP Skill
 
-R3NE is a real-time Swift/Metal node-based VJ engine. This skill teaches how to drive it through the `r3ne` MCP server (tool prefix `mcp__r3ne__*`) which talks to the embedded HTTP API at `localhost:19780`.
+R3NE is a real-time Swift/Metal node-based VJ engine. This skill teaches you to drive it through the `r3ne` MCP server (tool prefix `mcp__r3ne__*`, or `mcp__plugin_r3ne_r3ne__*` when installed as a plugin), which talks to the embedded HTTP API at `localhost:19780` (`R3NE_API_PORT` overrides the port).
+
+> **Building a 3D scene, importing a model, lighting, or a camera shot? Load the `r3ne-3d` skill as well.** It covers the scene workflow (snapshot after every step), `import_mesh` for .glb/.fbx/.obj made in Blender or procedurally, `look_at`, save/open, and the look recipes, gotchas and performance budgets.
 
 ## 1. Pre-flight checks (do these first, every session)
 
@@ -35,7 +37,7 @@ Index convention in the `connections` array: `targetIndex: -1` means "the Root n
   "nodes": [
     {"type": "fractalNoise", "x": 100, "y": 100},
     {"type": "shader", "name": "Tint pink", "x": 400, "y": 100,
-     "source": "// @input color tint 1.0 0.4 0.8 1.0\nfloat4 tex = inputTex.sample(s, in.uv);\nreturn float4(tex.rgb * tint.rgb, tex.a);"}
+     "source": "// @input color tint 1.0 0.4 0.8 1.0\nfloat4 tex = inputTex.sample(texSampler, in.uv);\nreturn float4(tex.rgb * tint.rgb, tex.a);"}
   ],
   "connections": [
     {"sourceIndex": 0, "sourcePort": "texture", "targetIndex": 1, "targetPort": "inputTex"},
@@ -67,7 +69,7 @@ Available in shader body:
 - `in.position` (`float4`) — clip-space position
 - `u.time` (`float`) — seconds elapsed
 - `u.resolution` (`float2`) — render-target size in px
-- `s` — predeclared linear-clamp sampler
+- `texSampler` — predeclared linear-clamp sampler
 
 For `pbrMaterial`, the body must set `out.albedo`, `out.metallic`, `out.roughness`, `out.emission`. See `references/3d-pipeline.md` for the PBR template.
 
@@ -87,6 +89,7 @@ For real-world parameter values, see `references/3d-pipeline.md`.
 
 ## 6. Common pitfalls
 
+- **See the result.** `snapshot` returns any node's render as an image (Scene 3D, Root, 2D nodes, Material preview). Use it instead of guessing. `get_node` shows one node's ports, with values parsed.
 - **Nothing renders**: probably nothing is wired to Root. Call `get_graph` and check the connection list.
 - **Black 3D scene**: no light connected, or `intensity` is 0, or camera looking the wrong way.
 - **Shader compiled but pink screen**: a runtime issue (NaN, divide by zero). Re-check the MSL.
@@ -97,7 +100,8 @@ For real-world parameter values, see `references/3d-pipeline.md`.
 
 ## 7. When to load the references
 
-- Building anything 3D, or writing a `pbrMaterial` → load `references/3d-pipeline.md`.
+- Composing a 3D scene, importing meshes, lighting/camera/post → use the **`r3ne-3d`** skill.
+- Writing a `pbrMaterial`, or wiring basics of the 3D node types → load `references/3d-pipeline.md`.
 - Writing a non-trivial 2D shader (tracing/feedback/multi-tap) → load `references/shader-patterns.md`.
 - Don't load references for one-shot tasks like "set the bloom intensity to 0.7".
 
