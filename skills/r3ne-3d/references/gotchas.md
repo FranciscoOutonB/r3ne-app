@@ -55,3 +55,11 @@
 - **The snapshot looks different from the window.** The snapshot is the node's own render target at the Scene 3D resolution (e.g. 1920×1080), downscaled to ≤1024 px wide. The window letterboxes.
 - **Transparent background.** Without a sky or HDRI as background, the Scene 3D background is transparent (`meanAlpha < 1`). JPEG snapshots show it black. Use `format: "png"` to keep the alpha.
 - **The live snapshot is mid-adaptation** (auto exposure, TAA history, path tracer samples). Use `offline: true` for a deterministic, Export-identical frame. Re-opening a saved project then gives a byte-identical frame, which makes a good regression check.
+
+## Quality presets, cameras, groups, scatter
+
+- **Presets flip to Custom.** Sending any key a preset controls (renderScale, upscaleMode, shadows, contact shadows, GTAO, SSR, SSGI, `volumetricQuality`, RT options) with a new value switches `qualityPreset` to 0 Custom. Set the preset first, then tweak. Auto re-picks on open (another Mac) and on a resolution change.
+- **Camera Switch index** counts the *connected* cameras in slot order (1-based); the MIDI/OSC range is 1–8 whatever the number of cameras. Cut resets temporal history (no TAA smear across the cut); Mix interpolates position, orientation, FOV, focus and exposure (in stops). The viewport and the Camera 3D inspector act on the camera on air.
+- **Group 3D:** an Instancer fed a group replaces the group's own transform (same rule as any Instancer source); one group per object; put Twist / Noise / Wave modifiers on the children, not after the group; cameras, particles and splats can't be grouped. Hiding a group also switches its lights off.
+- **Scatter Surface** ignores the Instancer's own transform (copies sit on the surface where it is) and takes the surface's position/orientation but not its scale; the surface mesh renders only if it is also wired into the scene. No overlap avoidance — raise `seed`/area or lower `count` if copies collide.
+- **Gizmo keys** in the viewport are 1 / 2 / 3 (move / rotate / scale), not W/E/R (W and E fly the camera); Shift snaps 0.1 m / 15° / ×0.1 relative to the drag; ⌥-click selects the object's group.

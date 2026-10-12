@@ -95,7 +95,10 @@ Say in one sentence what you see and what you'll change, then change it.
 - **Emissive surfaces don't light their surroundings.** Put a `pointLight3d` at the emitter with **`castShadows: 0`**. With shadows on, it sits inside the mesh and the mesh shadows everything.
 - **A connected Material node overrides every part of a model.** To give one part its own material (glass, say), export that part as a separate file.
 - **Vertex colors are ignored.** Use materials or a texture.
-- **Build repetition with `instancer3d`**, not duplicated loaders: `meshLoader3d → instancer3d.geometry → scene.geo_N`. Each copy is one draw per part, capped at 10,000.
+- **Build repetition with `instancer3d`**, not duplicated loaders: `meshLoader3d → instancer3d.geometry → scene.geo_N`. Each copy is one draw per part (~10 µs of CPU each), capped at 10,000 — live, think low thousands. Layouts: `mode` 0 Linear / 1 Radial / 2 Grid (`countX` × `countZ`; 0 = from `count`), `pivot` 0 Start / 1 Center / 2 End, or `scatter` 1 Area (`areaX`/`areaZ`) / 2 Surface (wire a mesh into `surface`) with `seed`, `scaleMin`/`scaleMax`, `randomRotation` (°), `alignToNormal`. `pulse` (+ `pulseStretch`, `pulseRipple`, `pulseJitter`, `pulsePivot`) stretches copies from an audio band.
+- **Quality first.** New Scene 3D nodes start on `qualityPreset` 1 Auto (0 Custom, 2 Low, 3 Medium, 4 High, 5 Ultra); Auto picks by the Mac's GPU and the resolution and reports `qualityAutoLevel`, `gpu`, `qualityHint`. Set the preset **before** tweaking: sending any preset-controlled key (renderScale, shadows, GTAO, SSR, SSGI, fog quality, RT…) switches it to Custom.
+- **Several cameras:** wire Camera 3D nodes into a `cameraSwitch3d` (`camera_1…8` → its `camera` output → `scene.camera`); `index` (1-based) picks the shot, `mode` 0 Cut / 1 Blend (over `blendTime` s) / 2 Mix (fractional index = a move between two cameras). `look_at` the individual cameras, not the switch.
+- **Groups:** `group3d` (`geo_N`, `light_N` in, `geometry` out → `scene.geo_N`) moves/rotates/scales its children together; groups nest. One group per object; cameras can't be grouped.
 
 ## 6. When to load the references
 

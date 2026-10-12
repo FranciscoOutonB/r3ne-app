@@ -80,3 +80,15 @@ The Material node's own snapshot (`snapshot {id: <material3d>}`) returns its pre
 - Lens: `vignette 0.2–0.35`, `chromaticAberration 0.2–0.5`, `grain 0.1–0.2`.
 - Motion blur: `motionBlurEnabled` follows the camera's `shutterSpeed` (1/x s).
 - Exposure: in Manual mode use `exposure` (multiplier) or `exposureCompensation` (stops). Physical Camera mode (`exposureMode 1`) follows the camera's fStop/shutter/ISO/ND (EV 15 = sunny day = ×1), and is often ~5 stops over in daylight scenes until you match it. Auto (`exposureMode 2`) meters like a camera, which is nice for moving lights but makes snapshots time-dependent.
+
+## Scatter: grass, spikes, rocks
+
+- `instancer3d` with `scatter 2` (Surface): wire the ground/sphere mesh into `surface` (and also into the scene so it renders), the blade/spike/rock into `geometry`. `count` 300–2,000 live, `scaleMin 0.6` / `scaleMax 1.4`, `randomRotation 180`, `alignToNormal 1` for spikes on a sphere, 0 for grass that stays upright. Change `seed` for a new layout.
+- Flat patch: `scatter 1` (Area) with `areaX`/`areaZ` in metres around the Instancer's position.
+- Audio: `audioBands.bass → instancer.pulse` with `pulseRipple 0.03` makes the field breathe outward.
+
+## Camera moves with a fader (Camera Switch Mix)
+
+- Two (or more) Camera 3D nodes aimed with `look_at` (e.g. wide and close), wired into `cameraSwitch3d` → `scene.camera`, `mode 2` (Mix).
+- Map a MIDI fader or keyframe `index` from 1 to 2: the shot glides between the cameras (position, aim, lens, focus, exposure). Ease it with a `smoothValue` between the fader and `index`.
+- For live cuts use `mode 0` and map `index` to buttons (or the inspector's take buttons); `mode 1` gives a timed dissolve-like move over `blendTime`.
