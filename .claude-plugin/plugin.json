@@ -1,7 +1,7 @@
 {
   "name": "r3ne",
   "description": "Build VJ compositions, shaders, and 3D scenes in R3NE. Bundles the r3ne MCP server (talks to the running R3NE.app on localhost:19780) plus skills that teach Claude how to drive it — including r3ne-3d for composing 3D scenes and importing meshes made in Blender or procedurally.",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "author": {
     "name": "Francisco Outón",
     "url": "https://r3ne.app"
