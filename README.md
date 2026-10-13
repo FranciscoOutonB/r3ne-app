@@ -92,6 +92,7 @@ r3ne-app/
 
 ## Changelog
 
+- **0.3.3** — `r3ne-3d` skill: Mapping Cameras 3D rig (`rigPosition*`/`rigRotation*`, one transform over every view) and screen map (views projected onto a custom screen mesh in its UV layout → `screenMap`, LED tunnel worked example + OBJ pixel-map sketch). Needs R3NE main c318e45 or later.
 - **0.3.2** — `r3ne-3d` skill: projection mapping with Mapping Cameras 3D (multi-view routing, projector lens options, edge blending) — new `references/mapping.md`. Needs R3NE main e55e013 or later.
 - **0.3.1** — `r3ne-3d` skill: Scene 3D quality presets (Auto per GPU) and the live budget table, Camera Switch 3D (Cut / Blend / Mix), Group 3D, Instancer Scatter (Area / Surface) + grid `countX`/`countZ` / `pivot`, gizmo keys, measured Instancer CPU cost (~10 µs per copy). Needs an R3NE build from main 75f5b35 or later.
 - **0.3.0** — New `r3ne-3d` skill (3D scene workflow, mesh import from Blender / procedural glTF, look recipes, gotchas, performance budgets). New MCP tools: `get_node`, `snapshot`, `import_mesh`, `look_at`, `save_project`, `open_project`; `R3NE_API_PORT` / `R3NE_API_BASE` env override. `r3ne` skill: sampler name fix (`texSampler`), no `@input int`. Needs an R3NE build from the render-3d branch for save/open, offline snapshots and Mesh Loader load reports.

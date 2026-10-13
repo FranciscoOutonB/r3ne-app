@@ -15,7 +15,8 @@
 ## Transforms and aiming
 
 - **Rotation units.** `rotationX/Y/Z` are **radians**. `rotationXDeg/YDeg/ZDeg` are **degrees** (what the inspector shows; if both are sent, `…Deg` wins). `autoRotateX/Y/Z` are rad/s (the inspector shows °/s). `instancer3d.rotateStep` is in **degrees** per copy.
-- **Order and forward.** The matrix is T · Rz · Ry · Rx · S. Forward is **−Z**, rotationX = pitch (+ = up), rotationY = yaw. The world forward of a node is (−cos p · sin y, sin p, −cos p · cos y), which only holds with rotationZ 0 (roll rotates the aim). The camera's up vector is always world +Y, so roll is ignored for cameras and straight up/down is degenerate. `look_at` handles all of this and clamps pitch to ±89.5°.
+- **Order and forward.** The matrix is T · Rz · Ry · Rx · S. Forward is **−Z**, rotationX = pitch (+ = up), rotationY = yaw. The world forward of a node is (−cos p · sin y, sin p, −cos p · cos y), which only holds with rotationZ 0 (roll rotates the aim). The camera's up vector is always world +Y, so roll is ignored for cameras; exactly straight up/down (`rotationXDeg ±90`) has a defined view on current builds (older builds needed ±89.5°). `look_at` handles all of this and clamps pitch to ±89.5°.
+- **Mapping rig rotation is degrees.** `mappingCameras3d` `rigRotationX/Y/Z` are degrees (not radians like node `rotationX/Y/Z`); the rig turns around the scene origin + rig position.
 - **Scale.** `scaleX/Y/Z` on any 3D node work through `set_params` / `create_node` on this branch (verified on `cube3d`). Builds before the skill's API fix clamped them to ≤ 10, because the timeline channel range clamped the value. For big objects prefer the geometry's own size ports (`cube3d.size`, `plane3d.width/height`, `sphere3d.radius`, Mesh Loader `scale`), which also keep the normals and shadow bounds sensible.
 - **Sky sun.** The `sky3d` sun is aimed with `azimuth`/`elevation` (with `manualSun 1`) or `timeOfDay`/`latitude`/`dayOfYear`, not with rotation. `northOffset` rotates the whole sky.
 
@@ -24,6 +25,7 @@
 - **The model doesn't appear.** Is it wired into a scene (`geo_N`, directly or through an instancer or modifier)? An unwired loader never loads. If `loadSummary` is empty, no frame has rendered yet (the window is hidden?). Is it scaled to cm or mm (`boundsSize` in the hundreds)? Is the camera inside it?
 - **A Mesh Loader feeding an instancer didn't load** (builds before the skill's fix). Scene 3D cached its geometry list before the instancer had resolved its source, so the mesh was never built. Fixed on render-3d. On older builds, disconnect and reconnect the instancer → scene link.
 - **Re-exported the file, nothing changed.** The loader doesn't watch the file. Re-send `set_params {"filePath": "<same path>"}`.
+- **Screen map black or "Cycle detected".** The `screen` mesh needs UVs (OBJ `vt`) and must stay out of the Scene 3D; texels no camera sees are black. Feeding `screenMap` back into the same mesh's material is a cycle — load a copy for previs.
 - **Grey model.** A Material node is connected (it overrides all parts), or `useFileMaterials` is false, or the file has no materials (OBJ without MTL, STL, PLY).
 - **One part needs a different material.** A connected Material applies to the whole model, so split the part into its own file.
 - **Flat-shaded or faceted when it should be smooth (or the other way round).** Normals come from the file. Re-export with the right shading. Smooth normals are only generated when the file has none.
