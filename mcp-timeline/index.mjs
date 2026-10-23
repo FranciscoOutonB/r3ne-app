@@ -17,7 +17,10 @@ function api(method, path, body) {
     const u = new URL(BASE + path);
     const req = http.request(
       { hostname: u.hostname, port: u.port, path: u.pathname + u.search, method,
-        headers: { "Content-Type": "application/json" } },
+        // Explicit Content-Length: without it Node sends Transfer-Encoding: chunked,
+        // which the editor's single-read HTTP parser doesn't decode (body → {}).
+        headers: { "Content-Type": "application/json",
+                   ...(data ? { "Content-Length": Buffer.byteLength(data) } : {}) } },
       (res) => {
         let buf = "";
         res.on("data", (c) => (buf += c));
@@ -30,8 +33,8 @@ function api(method, path, body) {
     );
     req.on("error", (e) =>
       reject(new Error(`Cannot reach R3NE at ${BASE} (${e.message}). Is the editor open?`)));
-    if (data) req.write(data);
-    req.end();
+    // One write so headers + body land in the same segment the server reads.
+    req.end(data ?? undefined);
   });
 }
 const safeParse = (s) => { try { return JSON.parse(s); } catch { return s; } };
@@ -126,8 +129,20 @@ const TOOLS = [
       required: ["node"],
       properties: { node: { type: "string" }, parameter: { type: "string" } },
     },
-    run: async (a) => api("DELETE", `/api/nodes/${await resolveNode(a.node)}/keyframes`,
-      a.parameter ? { parameter: a.parameter } : {}),
+    // The editor's DELETE …/keyframes route is shadowed by DELETE /api/nodes/{id}
+    // (node delete, which then rejects "{id}/keyframes" as a UUID), so clear via
+    // PUT with replace:true and no keyframes — once per channel when no parameter.
+    run: async (a) => {
+      const id = await resolveNode(a.node);
+      let params = a.parameter ? [a.parameter] : null;
+      if (!params) {
+        const tl = await api("GET", "/api/timeline");
+        const track = (tl.tracks || []).find((t) => t.nodeId === id);
+        params = (track?.channels || []).filter((c) => c.keyframes?.length).map((c) => c.parameter);
+      }
+      for (const p of params) await api("PUT", `/api/nodes/${id}/keyframes`, { parameter: p, replace: true, keyframes: [] });
+      return { nodeId: id, cleared: params };
+    },
   },
   {
     name: "r3ne_crossfade",
