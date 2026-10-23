@@ -23,6 +23,7 @@ R3NE is a real-time Swift/Metal node-based VJ engine. This skill teaches you to 
 - **3D layer** — geometry nodes (`cube3d`, `sphere3d`, `plane3d`, `torus3d`, `cylinder3d`, `cone3d`, `meshLoader3d`, `text3d`) flow through typed ports (`geometry`, `light`, `camera`, `material`, `particles`) into either a `scene3d` composer node OR directly into Root (which has built-in 3D compositing).
 - **Materials**: every geometry has `materialData` (albedo/metallic/roughness/emission). To override with live MSL, create a `pbrMaterial` and connect its `material` output to the geometry's `material` input.
 - **Modifiers**: `noiseDisplace3d`, `twist3d`, `wave3d` wrap a geometry's vertex buffer via compute pass. `instancer3d` clones a geometry N times.
+- **Post-FX effects work in place (loopback), not in a chain.** Blur, Glow, Kaleidoscope, Tint, Invert, Gradient Recolour and the other Post-FX nodes have **no output port**: they're applied to the node wired into their `texture` input. Wire `source.texture → effect.texture` for each effect, and keep `source.texture → Root.texture_N` (or downstream). Several effects on one source stack **top to bottom by their canvas position** (then left to right), so place them in the order you want. `get_graph` marks them `"postFX": true`. Wiring one as a source fails with an error that explains this. Generators, shaders, Picture/Video and Canvas *do* have a `texture` output.
 - **Connections are typed.** `float ↔ float`, `color ↔ float4` are interchangeable. `texture ↔ texture`, `geometry ↔ geometry`, etc. The MCP rejects incompatible pairs and cycles.
 
 ## 3. Building a composition — prefer `create_composition`
@@ -97,6 +98,7 @@ For real-world parameter values, see `references/3d-pipeline.md`.
 - **Disconnected MCP**: if every tool errors with "fetch failed", the app isn't running. Don't retry — tell the user.
 - **Connecting two `texture` nodes to the same input**: the older connection is auto-removed. That's intentional, not an error.
 - **Cycle**: rejected with `cycleDetected`. Restructure.
+- **"Source port 'texture' not found" / "… is a Post-FX effect and has no output"**: you tried `blur → glow → Root`. Effects don't chain that way: wire the generator into each effect and the generator to Root (see §2).
 
 ## 7. When to load the references
 
