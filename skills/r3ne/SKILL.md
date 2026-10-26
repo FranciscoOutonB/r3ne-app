@@ -30,6 +30,8 @@ R3NE is a real-time Swift/Metal node-based VJ engine. This skill teaches you to 
 
 For anything more than 1–2 nodes, use `mcp__r3ne__create_composition` instead of looping `create_node` + `connect_nodes`. It's atomic, batches shader compilation waits, and reports compilation errors per shader at the end.
 
+**Layout is automatic.** `create_composition` arranges the canvas left to right by data flow, with **Root alone in the right-most column** and Post-FX stacked under the node they apply to (their top-to-bottom order is the effect stack, and it's kept). You can omit `x`/`y`; pass `arrange: false` only to keep hand-picked positions. After editing a graph node by node, call `mcp__r3ne__arrange_graph` to tidy it the same way.
+
 Index convention in the `connections` array: `targetIndex: -1` means "the Root node". You don't list Root in `nodes`.
 
 ```json

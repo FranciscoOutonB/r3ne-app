@@ -30640,10 +30640,127 @@ function round(v, digits = 3) {
   return Math.round(v * k) / k;
 }
 
+// src/layout.ts
+var NODE_W = 200;
+var HEADER = 32;
+var PORT = 24;
+var PAD = 6;
+var ROOT_SIDE = 96;
+function isRoot(n) {
+  return n.type === "root";
+}
+function isPostFX(n) {
+  return n.postFX === true;
+}
+function height(n) {
+  if (isRoot(n)) return ROOT_SIDE;
+  const ins = (n.inputs?.length ?? 0) * PORT + PAD * 2;
+  const outs = (n.outputs?.length ?? 0) * PORT + PAD * 2;
+  return HEADER + Math.max(ins, outs, PORT + PAD * 2);
+}
+function byCanvasOrder(a, b) {
+  return (a.position?.y ?? 0) - (b.position?.y ?? 0) || (a.position?.x ?? 0) - (b.position?.x ?? 0) || a.id.localeCompare(b.id);
+}
+function computeLayout(nodes, connections, opts = {}) {
+  const colGap = opts.columnGap ?? 120;
+  const rowGap = opts.rowGap ?? 40;
+  const ox = opts.originX ?? 0;
+  const oy = opts.originY ?? 0;
+  const byId = new Map(nodes.map((n) => [n.id, n]));
+  const root = nodes.find(isRoot);
+  const attached = /* @__PURE__ */ new Map();
+  const fxIds = /* @__PURE__ */ new Set();
+  for (const n of nodes) {
+    if (!isPostFX(n)) continue;
+    const src = connections.find((c) => c.targetNodeId === n.id && byId.has(c.sourceNodeId));
+    if (!src || isPostFX(byId.get(src.sourceNodeId))) continue;
+    fxIds.add(n.id);
+    const list = attached.get(src.sourceNodeId) ?? [];
+    list.push(n);
+    attached.set(src.sourceNodeId, list);
+  }
+  for (const list of attached.values()) list.sort(byCanvasOrder);
+  const main2 = nodes.filter((n) => !fxIds.has(n.id));
+  const out = /* @__PURE__ */ new Map();
+  for (const n of main2) out.set(n.id, []);
+  for (const c of connections) {
+    if (out.has(c.sourceNodeId) && out.has(c.targetNodeId) && c.sourceNodeId !== c.targetNodeId) {
+      out.get(c.sourceNodeId).push(c.targetNodeId);
+    }
+  }
+  const rank = /* @__PURE__ */ new Map();
+  const visiting = /* @__PURE__ */ new Set();
+  const rankOf = (id) => {
+    const cached2 = rank.get(id);
+    if (cached2 !== void 0) return cached2;
+    if (visiting.has(id)) return 0;
+    visiting.add(id);
+    const downs = out.get(id) ?? [];
+    let r;
+    if (downs.length === 0) r = root && id === root.id ? 0 : 1;
+    else r = Math.max(...downs.map((d) => rankOf(d) + 1));
+    if (root && id !== root.id) r = Math.max(r, 1);
+    visiting.delete(id);
+    rank.set(id, r);
+    return r;
+  };
+  for (const n of main2) rankOf(n.id);
+  const maxRank = Math.max(0, ...rank.values());
+  const columns = Array.from({ length: maxRank + 1 }, () => []);
+  for (const n of main2) columns[maxRank - rank.get(n.id)].push(n);
+  const yCenter = /* @__PURE__ */ new Map();
+  const blockHeight = (n) => height(n) + (attached.get(n.id) ?? []).reduce((h, fx) => h + rowGap / 2 + height(fx), 0);
+  const place = (col, ci, positions2) => {
+    const x = ox + ci * (NODE_W + colGap);
+    const total = col.reduce((h, n) => h + blockHeight(n), 0) + rowGap * Math.max(0, col.length - 1);
+    const targets = col.flatMap((n) => (out.get(n.id) ?? []).map((d) => yCenter.get(d)).filter((v) => v !== void 0));
+    const mid = targets.length ? targets.reduce((a, b) => a + b, 0) / targets.length : oy + total / 2;
+    let y = Math.max(oy, mid - total / 2);
+    for (const n of col) {
+      const w = isRoot(n) ? ROOT_SIDE : NODE_W;
+      positions2.set(n.id, { x: isRoot(n) ? x + (NODE_W - w) / 2 : x, y });
+      yCenter.set(n.id, y + height(n) / 2);
+      let fy = y + height(n) + rowGap / 2;
+      for (const fx of attached.get(n.id) ?? []) {
+        positions2.set(fx.id, { x: x + 24, y: fy });
+        fy += height(fx) + rowGap / 2;
+      }
+      y += blockHeight(n) + rowGap;
+    }
+  };
+  const portY = (targetId, port, pos) => {
+    const t = byId.get(targetId);
+    const top = pos.get(targetId).y;
+    if (isRoot(t)) return top + ROOT_SIDE / 2;
+    const i = Math.max(0, (t.inputs ?? []).findIndex((p) => p.name === port));
+    return top + HEADER + PAD + i * PORT + PORT / 2;
+  };
+  const positions = /* @__PURE__ */ new Map();
+  for (let ci = columns.length - 1; ci >= 0; ci--) {
+    const col = columns[ci];
+    col.sort((a, b) => {
+      const bary = (n) => {
+        const ys = connections.filter((c) => c.sourceNodeId === n.id && positions.has(c.targetNodeId)).map((c) => portY(c.targetNodeId, c.targetPort, positions));
+        return ys.length ? ys.reduce((s, v) => s + v, 0) / ys.length : Number.POSITIVE_INFINITY;
+      };
+      return bary(a) - bary(b) || byCanvasOrder(a, b);
+    });
+    place(col, ci, positions);
+  }
+  if (root && positions.has(root.id)) {
+    const feeds = connections.filter((c) => c.targetNodeId === root.id && positions.has(c.sourceNodeId)).map((c) => positions.get(c.sourceNodeId).y + height(byId.get(c.sourceNodeId)) / 2);
+    if (feeds.length) {
+      const p = positions.get(root.id);
+      p.y = Math.max(oy, feeds.reduce((a, b) => a + b, 0) / feeds.length - ROOT_SIDE / 2);
+    }
+  }
+  return positions;
+}
+
 // src/index.ts
 var server = new McpServer({
   name: "r3ne",
-  version: "1.1.0"
+  version: "1.2.0"
 });
 server.tool(
   "health",
@@ -30944,8 +31061,11 @@ Nodes are created in order, then connections are made. Use this for building ful
 
 Each node in the 'nodes' array should have: type, name (optional), x, y (optional), source (for shaders), params (optional).
 Each connection should reference nodes by their array index (0-based): sourceIndex, sourcePort, targetIndex, targetPort.
-Use targetIndex: -1 to connect to the Root/Output node.`,
+Use targetIndex: -1 to connect to the Root/Output node.
+
+By default the nodes are arranged automatically (data flows left to right, Root alone in the right-most column, Post-FX stacked under their source), so x/y can be omitted. Pass arrange: false to keep the x/y you give.`,
   {
+    arrange: external_exports3.boolean().optional().describe("Auto-arrange the nodes left\u2192right with Root on the right (default: true)"),
     clearFirst: external_exports3.boolean().optional().describe("Clear existing graph before creating (default: false)"),
     nodes: external_exports3.array(external_exports3.object({
       type: external_exports3.string(),
@@ -30962,7 +31082,7 @@ Use targetIndex: -1 to connect to the Root/Output node.`,
       targetPort: external_exports3.string()
     })).describe("Array of connections to make")
   },
-  async ({ clearFirst, nodes: nodeSpecs, connections: connSpecs }) => {
+  async ({ arrange, clearFirst, nodes: nodeSpecs, connections: connSpecs }) => {
     try {
       if (clearFirst) {
         await clearGraph();
@@ -30985,6 +31105,20 @@ Use targetIndex: -1 to connect to the Root/Output node.`,
         createdNodes.push(node);
       }
       await new Promise((resolve) => setTimeout(resolve, 300));
+      if (arrange !== false) {
+        const idOf = (i) => i === -1 ? rootNode.id : createdNodes[i]?.id;
+        const planned = connSpecs.map((c) => ({
+          id: "",
+          sourceNodeId: idOf(c.sourceIndex) ?? "",
+          sourcePort: c.sourcePort,
+          targetNodeId: idOf(c.targetIndex) ?? "",
+          targetPort: c.targetPort
+        })).filter((c) => c.sourceNodeId && c.targetNodeId);
+        const current = await getGraph();
+        const specY = new Map(createdNodes.map((n, i) => [n.id, nodeSpecs[i]?.y ?? i]));
+        const nodes = current.nodes.map((n) => specY.has(n.id) ? { ...n, position: { x: n.position?.x ?? 0, y: specY.get(n.id) } } : n);
+        await applyLayout(nodes, [...current.connections, ...planned]);
+      }
       const createdConns = [];
       for (const conn of connSpecs) {
         const sourceId = createdNodes[conn.sourceIndex]?.id;
@@ -31034,6 +31168,27 @@ Use targetIndex: -1 to connect to the Root/Output node.`,
           }
         ]
       };
+    } catch (e) {
+      return { content: [{ type: "text", text: `Error: ${e.message}` }], isError: true };
+    }
+  }
+);
+async function applyLayout(nodes, connections) {
+  const positions = computeLayout(nodes, connections);
+  for (const [id, p] of positions) {
+    await setParams(id, { x: Math.round(p.x), y: Math.round(p.y) });
+  }
+  return positions.size;
+}
+server.tool(
+  "arrange_graph",
+  `Tidy the whole canvas: lay the graph out left to right in columns by data flow, with the Root/Output node alone in the right-most column. Post-FX effects are stacked under the node they apply to, keeping their order (their top-to-bottom order is the effect stack order). Call it after building or editing a graph by hand.`,
+  {},
+  async () => {
+    try {
+      const graph = await getGraph();
+      const moved = await applyLayout(graph.nodes, graph.connections);
+      return { content: [{ type: "text", text: JSON.stringify({ arranged: moved }, null, 2) }] };
     } catch (e) {
       return { content: [{ type: "text", text: `Error: ${e.message}` }], isError: true };
     }
