@@ -102,6 +102,17 @@ For real-world parameter values, see `references/3d-pipeline.md`.
 - **Cycle**: rejected with `cycleDetected`. Restructure.
 - **"Source port 'texture' not found" / "… is a Post-FX effect and has no output"**: you tried `blur → glow → Root`. Effects don't chain that way: wire the generator into each effect and the generator to Root (see §2).
 
+## 6b. Music-driven visuals — `analyze_song` + Song Structure
+
+To make visuals follow a song's structure (not just its spectrum):
+
+1. `mcp__r3ne__analyze_song` with the audio file's absolute path (macOS 27 only; ~20 s, then cached). It returns tempo, meter, first downbeat, key, **sections** (start/end/bars), instrument spans and **cues** (section starts, drops, vocals/drums in/out). Pass `applyToTimeline: true` to set the timeline's length, BPM grid and ruler markers.
+2. Build the patch: a `soundLoader` (set `filePath`) wired into a `songStructure` node's `sound` input, then `analyze_song` again with `nodeId` of that node (instant, cached) to store the analysis in it.
+3. Drive parameters from its float outputs: `beat` / `bar` (pulses that decay by `pulseDecay`), `beatPhase` / `barPhase` (0→1), `section` (1-based), `sectionProgress`, `sectionChange`, `drop`, `loudness` (0–1), `vocals` / `drums` / `bass` / `other` (activity 0–1), `bpm`.
+4. Plan looks per section from the analysis (e.g. calm palette in the intro, kaleidoscope on the chorus sections, a flash on every `drop`), using keyframes at the section start times or `section` through a math node.
+
+The analysis is saved in the project, so it plays on older macOS and in R3NE Server too.
+
 ## 7. When to load the references
 
 - Composing a 3D scene, importing meshes, lighting/camera/post → use the **`r3ne-3d`** skill.

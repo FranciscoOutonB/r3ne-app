@@ -30182,6 +30182,9 @@ async function listPresets() {
 async function listNodeTypes() {
   return apiCall("GET", "/api/node-types");
 }
+async function analyzeSong(params) {
+  return apiCall("POST", "/api/song/analyze", params);
+}
 async function clearGraph() {
   return apiCall("POST", "/api/graph/clear");
 }
@@ -30760,7 +30763,7 @@ function computeLayout(nodes, connections, opts = {}) {
 // src/index.ts
 var server = new McpServer({
   name: "r3ne",
-  version: "1.2.0"
+  version: "1.3.0"
 });
 server.tool(
   "health",
@@ -31189,6 +31192,28 @@ server.tool(
       const graph = await getGraph();
       const moved = await applyLayout(graph.nodes, graph.connections);
       return { content: [{ type: "text", text: JSON.stringify({ arranged: moved }, null, 2) }] };
+    } catch (e) {
+      return { content: [{ type: "text", text: `Error: ${e.message}` }], isError: true };
+    }
+  }
+);
+server.tool(
+  "analyze_song",
+  `Analyze a song's structure with Apple's music analysis (needs R3NE on macOS 27; ~20 s per song, then cached): tempo, meter, first downbeat, key, sections (start/end/bar count), instrument spans (vocal/drum/bass/other) and cues (section starts, drops, instrument in/out, key changes).
+
+Use it to build visuals that follow the song: e.g. one look per section, a flash on each drop, a different palette when the vocals come in. Then wire a "songStructure" node (with a soundLoader on its \`sound\` input) to drive parameters live: outputs beat/bar pulses and phases, section (1-based) / sectionProgress / sectionChange, drop, loudness, vocals/drums/bass/other activity, bpm.
+
+applyToTimeline: also set the timeline's length, BPM, first downbeat and meter, and mark sections/drops/cues on the ruler. nodeId: store the analysis in that songStructure node. full: include every beat and bar time.`,
+  {
+    path: external_exports3.string().describe("Absolute path to the audio file"),
+    applyToTimeline: external_exports3.boolean().optional().describe("Line the timeline up with the song (default false)"),
+    nodeId: external_exports3.string().optional().describe("A songStructure node to store the analysis in"),
+    full: external_exports3.boolean().optional().describe("Include all beat and bar times (default false)")
+  },
+  async ({ path, applyToTimeline, nodeId, full }) => {
+    try {
+      const result = await analyzeSong({ path, applyToTimeline, nodeId, full });
+      return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
     } catch (e) {
       return { content: [{ type: "text", text: `Error: ${e.message}` }], isError: true };
     }
