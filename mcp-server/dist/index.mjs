@@ -30810,6 +30810,7 @@ Shader nodes (2D): type="shader" + MSL source with @input annotations:
   // @input color tint 0.2 0.6 1.0 1.0
   // @input texture inputTex
   // @input bool invert false
+  // @input option mode 0 Soft Hard Glitch   (buttons; int mode = 0..2 in the body)
 
 3D nodes (first-class on the canvas, all connect through typed ports):
   Composer:   "scene3d" \u2014 geo_N / light_N / camera / environment inputs, outputs 'texture'
@@ -30946,6 +30947,7 @@ server.tool(
    // @input float scale 8.0 1.0 30.0
    // @input color tint 0.2 0.6 1.0 1.0
    // @input bool invert false
+   // @input option mode 0 Soft Hard Glitch
    // @input texture inputTex
 
    float2 uv = in.uv;

@@ -19,6 +19,7 @@ texSampler      sampler  linear-clamp predeclared
 // @input float amount 0.5                   // value only — UI uses 0..1 default range
 // @input color tint 0.2 0.6 1.0 1.0         // r g b a
 // @input bool invert false                  // checkbox
+// @input option mode 0 Soft Hard Glitch     // buttons; `int mode` = 0, 1, 2 in the body
 // @input texture inputTex                   // texture port
 ```
 

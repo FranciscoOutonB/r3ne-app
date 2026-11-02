@@ -58,6 +58,7 @@ R3NE auto-wraps the body so you don't write the function signature in DYNAMIC IN
 // @input float scale 8.0 1.0 30.0
 // @input color tint 0.2 0.6 1.0 1.0
 // @input bool invert false
+// @input option mode 0 Waves Rings Grid
 // @input texture inputTex
 
 float2 uv = in.uv;
@@ -66,6 +67,8 @@ float3 color = tint.rgb * wave;
 if (invert) color = 1.0 - color;
 return float4(color, 1.0);
 ```
+
+`option` is a choice shown as buttons in the inspector: `// @input option name defaultIndex Label1 Label2 …` (`_` in a label shows as a space). In the body it is an `int` (0, 1, 2…), already rounded and clamped, so `if (mode == 1)` or `switch (mode)` just work. Use it instead of a float slider whenever a parameter has a few hard steps (shape, mode, palette). Over the API set it with the index: `set_params {mode: 2}`.
 
 Available in shader body:
 - `in.uv` (`float2`) — normalized 0–1 UV
