@@ -166,8 +166,18 @@ class R3NE:
         return self._req("PUT", f"/api/nodes/{self._nid(node)}/keyframes", body)
 
     def clear_keyframes(self, node, parameter=None):
-        body = {"parameter": parameter} if parameter else {}
-        return self._req("DELETE", f"/api/nodes/{self._nid(node)}/keyframes", body)
+        # PUT replace:true with no keyframes, not DELETE …/keyframes: editor builds
+        # before the router fix send that DELETE to node-delete ("Invalid UUID").
+        nid = self._nid(node)
+        if parameter:
+            params = [parameter]
+        else:
+            track = next((t for t in self.timeline().get("tracks", []) if t["nodeId"] == nid), {})
+            params = [c["parameter"] for c in track.get("channels", []) if c.get("keyframes")]
+        for p in params:
+            self._req("PUT", f"/api/nodes/{nid}/keyframes",
+                      {"parameter": p, "replace": True, "keyframes": []})
+        return {"nodeId": nid, "cleared": params}
 
     # -- curve generators (the "programmatic in/out" sugar) ------------------
     def ramp(self, node, parameter, t0, t1, v0, v1, interp="linear", replace=True):
